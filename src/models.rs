@@ -66,3 +66,37 @@ pub struct Instrument {
     pub maxStopSz: Option<String>,
     pub futureSettlement: Option<bool>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct BookMsg {
+    pub arg: BookArg,
+    pub action: Option<String>, // snapshot or update
+    pub data: Vec<BookData>,
+    pub ts: i64,
+    pub checksum: Option<i64>,
+    pub seqId: Option<i64>,
+    pub prevSeqId: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WsBookPush {
+    pub arg: BookArg,
+    pub action: Option<String>,
+    pub data: Vec<BookData>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BookArg {
+    pub channel: String,
+    pub instId: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BookData {
+    pub asks: Vec<[String; 4]>,
+    pub bids: Vec<[String; 4]>,
+    pub ts: String,
+    pub checksum: Option<i64>,
+    pub seqId: Option<i64>,
+    pub prevSeqId: Option<i64>,
+}
