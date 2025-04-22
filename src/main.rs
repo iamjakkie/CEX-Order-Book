@@ -1,10 +1,11 @@
 mod models;
-
+mod orderbook;
 mod sources;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use models::{Instrument, OkxResponse, WsBookPush};
+use orderbook::OrderBook;
 use serde_json::json;
 use tokio::runtime::Runtime;
 use tokio_tungstenite::connect_async;
@@ -66,6 +67,7 @@ fn calc_latency(ts_str: &str) -> Option<Duration> {
 }
 
 fn main() {
+    let mut book = OrderBook::new();
     let rt = Runtime::new().unwrap();
     rt.block_on(async {
         let url = "wss://ws.okx.com:8443/ws/v5/public";
@@ -75,7 +77,7 @@ fn main() {
             "op": "subscribe",
             "args": [{
                 "channel": "books",
-                "instId": "BTC-USDT-SWAP"
+                "instId": "AI16Z-USDT-SWAP"
             }]
         })
         .to_string();
@@ -86,8 +88,26 @@ fn main() {
             let msg = msg.unwrap();
             if let tokio_tungstenite::tungstenite::Message::Text(txt) = msg {
                 if let Ok(parsed) = serde_json::from_str::<WsBookPush>(&txt) {
-                    if let Some(latency) = calc_latency(&parsed.data[0].ts) {
-                        println!("⏱️ Latency: {:?}", latency);
+                    // println!("📥 Received: {:?}", parsed);
+                    for data in parsed.data {
+                        match parsed.action.as_deref() {
+                            Some("snapshot") => book.apply_snapshot(&data),
+                            Some("update") => book.apply_update(&data),
+                            _ => {}
+                        }
+                        // println!("📊 Order Book: {:?}", book);
+                        if let Some(mid) = book.mid_price() {
+                            let spread_bps = 0.0020;
+                            let quote_bid = mid * (1.0 - spread_bps / 2.0);
+                            let quote_ask = mid * (1.0 + spread_bps / 2.0);
+                        
+                            println!(
+                                "📢 QUOTE: BID {:.2} | ASK {:.2} | MID {:.2}",
+                                quote_bid, quote_ask, mid
+                            );
+                        }
+                
+                        // 🎯 START ACTING HERE (next step)
                     }
                 } else {
                     println!("⚠️ Couldn't parse: {}", txt);
