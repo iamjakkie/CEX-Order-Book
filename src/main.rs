@@ -102,7 +102,7 @@ fn main() {
                             let quote_ask = mid * (1.0 + spread_bps / 2.0);
                         
                             println!(
-                                "📢 QUOTE: BID {:.2} | ASK {:.2} | MID {:.2}",
+                                "📢 QUOTE: BID {:.5} | ASK {:.5} | MID {:.5}",
                                 quote_bid, quote_ask, mid
                             );
                         }

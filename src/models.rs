@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+
+
 #[derive(Debug, Deserialize)]
 pub struct OkxResponse<T> {
     pub code: String,
@@ -100,3 +102,4 @@ pub struct BookData {
     pub seqId: Option<i64>,
     pub prevSeqId: Option<i64>,
 }
+

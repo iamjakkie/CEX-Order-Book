@@ -21,6 +21,7 @@ impl OrderBook {
     }
 
     pub fn apply_snapshot(&mut self, data: &BookData) {
+        // println!("Snapshot: {:?}", data);
         self.bids.clear();
         self.asks.clear();
 
@@ -38,25 +39,26 @@ impl OrderBook {
     }
 
     pub fn apply_update(&mut self, update: &BookData) {
+        // println!("Update: {:?}", update);
         for [price_str, qty_str, ..] in &update.bids {
-            let price = price_str.parse::<f64>().unwrap();
+            let price = normalize_price(price_str.parse::<f64>().unwrap());
             let qty = qty_str.parse::<f64>().unwrap();
     
             if qty == 0.0 {
                 self.bids.remove((&price).into());
             } else {
-                self.bids.insert(ordered_float::OrderedFloat(price), qty);
+                self.bids.insert(price, qty);
             }
         }
     
         for [price_str, qty_str, ..] in &update.asks {
-            let price = price_str.parse::<f64>().unwrap();
+            let price = normalize_price(price_str.parse::<f64>().unwrap());
             let qty = qty_str.parse::<f64>().unwrap();
     
             if qty == 0.0 {
                 self.asks.remove((&price).into());
             } else {
-                self.asks.insert(ordered_float::OrderedFloat(price), qty);
+                self.asks.insert(price, qty);
             }
         }
     }
@@ -68,7 +70,7 @@ impl OrderBook {
     }
 
     pub fn best_bid(&self) -> Option<(f64, f64)> {
-        self.bids.iter().rev().next().map(|(p, s)| (p.into_inner(), *s))
+        self.bids.iter().next_back().map(|(p, s)| (p.into_inner(), *s))
     }
 
     pub fn best_ask(&self) -> Option<(f64, f64)> {
@@ -98,4 +100,8 @@ impl OrderBook {
             Some(bid_vol / (bid_vol + ask_vol))
         }
     }
+}
+
+fn normalize_price(p: f64) -> OrderedFloat<f64> {
+    OrderedFloat((p * 1_000_000.0).round() / 1_000_000.0)
 }
