@@ -2,6 +2,7 @@ mod models;
 mod orderbook;
 mod sources;
 mod strategy;
+mod strategies;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
