@@ -1,3 +1,11 @@
+use std::time::Instant;
+
+use reqwest::Client;
+use serde::Deserialize;
+use async_trait::async_trait;
+
+use crate::strategy::{OrderRequest, Side, Strategy, OrderFill};
+use crate::orderbook::OrderBook;
 
 #[derive(Debug)]
 enum Phase {
@@ -83,14 +91,13 @@ impl MMXMStrategy {
             self.symbol, self.htf_bar, limit
         );
 
-        if let Ok(resp) = self.http.get(&url).send().await
-            .and_then(|r| r.json::<OkxKlineResponse>().await)
-        {
-            let mut highs = Vec::new();
-            let mut lows  = Vec::new();
-            let mut closes = Vec::new();
+        if let Ok(resp) = self.http.get(&url).send().await {
+            if let Ok(parsed_resp) = resp.json::<OkxKlineResponse>().await {
+                let mut highs = Vec::new();
+                let mut lows  = Vec::new();
+                let mut closes = Vec::new();
 
-            for entry in resp.data.iter().rev() {
+                for entry in parsed_resp.data.iter().rev() {
                 let high: f64 = entry[2].parse().unwrap_or(0.0);
                 let low:  f64 = entry[3].parse().unwrap_or(0.0);
                 let close:f64 = entry[4].parse().unwrap_or(0.0);
@@ -117,6 +124,7 @@ impl MMXMStrategy {
             }
         }
     }
+}
 
     /// 90th-percentile threshold
     fn quantile_90(qs: &mut [f64]) -> f64 {
@@ -166,21 +174,52 @@ impl MMXMStrategy {
         // ... your existing fill logic ...
     }
 }
-
+#[async_trait::async_trait]
+#[async_trait]
 impl Strategy for MMXMStrategy {
-    fn on_price_tick(&mut self, price: f64, now: Instant) -> Vec<OrderRequest> {
-        self.on_price_tick_internal(price, now);
-        // return any orders you want to place
-        std::mem::take(&mut self.pending_orders)
-    }
-
-    fn on_order_book(&mut self, bids: &OrderBook, asks: &OrderBook) -> Vec<OrderRequest> {
-        // if you need book depth to set zones
-        self.update_zones(bids, asks);
+    fn on_timer(&mut self, _now: Instant) -> Vec<OrderRequest> {
+        // refresh PD arrays every hour
+        futures::executor::block_on(self.update_pd_arrays());
         Vec::new()
     }
 
+    fn on_order_book(&mut self, bids: &OrderBook, asks: &OrderBook) -> Vec<OrderRequest> {
+        // store snapshot for detectors
+        self.last_bids = bids.bids.iter().map(|(k, v)| (k.into_inner(), *v)).collect();
+        self.last_asks = asks.asks.iter().map(|(k, v)| (k.into_inner(), *v)).collect();
+        Vec::new()
+    }
+
+    fn on_price_tick(&mut self, price: f64, now: Instant) -> Vec<OrderRequest> {
+        // vol + phase + fills + prints
+        // Use `now` if needed for timing logic or remove this comment if not required.
+        let _ = now; // Suppress unused variable warning.
+
+        // phase logic
+        match self.current_phase {
+            Phase::Consolidation => {
+                if self.detect_liquidity_run(price) {
+                    println!("→ LiquidityRun {:.5}", price);
+                    self.current_phase = Phase::LiquidityRun;
+                }
+            }
+            Phase::LiquidityRun => {
+                if self.detect_smr(price) {
+                    println!("→ SMR {:.5}", price);
+                    self.current_phase = Phase::SMR;
+                    if let Some(s) = self.support {
+                        self.place_order(Side::Buy, s * 0.999, 1.0);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // return any new orders
+        std::mem::take(&mut self.open_orders)
+    }
+
     fn on_order_filled(&mut self, fill: OrderFill) {
-        self.process_fill(fill);
+        // track P&L …
     }
 }
