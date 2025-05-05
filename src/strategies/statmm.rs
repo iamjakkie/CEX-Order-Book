@@ -53,3 +53,33 @@ Usage
 4. Handle fills in `on_order_filled()` to update inventory and PnL.
 
 */
+
+use std::time::Instant;
+use crate::{
+    orderbook::OrderBook,
+    strategy::{Strategy, Side, OrderRequest, OrderFill},
+};
+
+pub struct StatMM {
+    prices: Vec<f64>,    // rolling buffer of recent mid-prices
+    mu: f64,             // OU long‐term mean
+    sigma: f64,          // OU volatility estimate
+    gamma: f64,          // inventory risk aversion
+    kappa: f64,          // fill‐rate sensitivity
+    T: f64,              // quoting horizon (in same units as timestamps)
+    inventory: f64,      // current net position
+}
+
+impl StatMM {
+    pub fn new(gamma: f64, kappa: f64, T: f64) -> Self {
+        Self {
+            prices: Vec::with_capacity(100),
+            mu: 0.0,
+            sigma: 0.0,
+            gamma,
+            kappa,
+            T,
+            inventory: 0.0,
+        }
+    }
+}
