@@ -82,4 +82,53 @@ impl StatMM {
             inventory: 0.0,
         }
     }
+
+    fn fit_ou(&mut self) {
+        let n = self.prices.len() as f64;
+        // mean
+        self.mu = self.prices.iter().sum::<f64>() / n;
+        // std dev
+        let var = self.prices
+            .iter()
+            .map(|p| (p - self.mu).powi(2))
+            .sum::<f64>() / n;
+        self.sigma = var.sqrt();
+    }
+
+    fn ao_quotes(&self) -> (f64, f64) {
+        let r = self.mu;  // reservation price
+        let base = self.gamma * self.sigma.powi(2) * self.T / 2.0
+                 + (1.0/self.gamma) * (1.0 + self.gamma/self.kappa).ln();
+        let skew = self.gamma * self.sigma.powi(2) * self.T * self.inventory;
+        let δ_bid = base - skew;
+        let δ_ask = base + skew;
+        (r - δ_bid, r + δ_ask)
+    }
+}
+
+impl Strategy for StatMM {
+    /// On every new mid‐price tick:
+    fn on_price_tick(&mut self, price: f64, _now: Instant) -> Vec<OrderRequest> {
+        self.prices.push(price);
+
+        // wait until we have enough samples to fit
+        if self.prices.len() >= 50 {
+            self.fit_ou();
+            let (bid, ask) = self.ao_quotes();
+            let size = 1.0;  // fixed for now
+            return vec![
+                OrderRequest { side: Side::Buy,  price: bid, size },
+                OrderRequest { side: Side::Sell, price: ask, size },
+            ];
+        }
+        Vec::new()
+    }
+
+    /// When an order actually fills, update inventory
+    fn on_order_filled(&mut self, fill: OrderFill) {
+        match fill.side {
+            Side::Buy  => self.inventory += fill.size,
+            Side::Sell => self.inventory -= fill.size,
+        }
+    }
 }
