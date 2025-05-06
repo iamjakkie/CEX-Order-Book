@@ -62,6 +62,7 @@ use crate::{
 
 pub struct StatMM {
     prices: Vec<f64>,    // rolling buffer of recent mid-prices
+    window: usize,       // rolling window size
     mu: f64,             // OU long‐term mean
     sigma: f64,          // OU volatility estimate
     gamma: f64,          // inventory risk aversion
@@ -71,9 +72,10 @@ pub struct StatMM {
 }
 
 impl StatMM {
-    pub fn new(gamma: f64, kappa: f64, T: f64) -> Self {
+    pub fn new(gamma: f64, kappa: f64, T: f64, window: usize) -> Self {
         Self {
             prices: Vec::with_capacity(100),
+            window,
             mu: 0.0,
             sigma: 0.0,
             gamma,
@@ -81,6 +83,15 @@ impl StatMM {
             T,
             inventory: 0.0,
         }
+    }
+    fn fit_vol(&mut self) {
+        let n = self.prices.len() as f64;
+        let mean = self.prices.iter().sum::<f64>() / n;
+        let var = self.prices
+            .iter()
+            .map(|p| (p - mean).powi(2))
+            .sum::<f64>() / n;
+        self.sigma = var.sqrt();
     }
 
     fn fit_ou(&mut self) {
@@ -104,24 +115,61 @@ impl StatMM {
         let δ_ask = base + skew;
         (r - δ_bid, r + δ_ask)
     }
+
+    fn ao_offsets(&self) -> (f64, f64) {
+        // base = γσ²T/2 + (1/γ)·ln(1 + γ/κ)
+        let base = self.gamma * self.sigma.powi(2) * self.T / 2.0
+                 + (1.0 / self.gamma) * (1.0 + self.gamma / self.kappa).ln();
+        // skew = γσ²T·inventory
+        let skew = self.gamma * self.sigma.powi(2) * self.T * self.inventory;
+        // bid offset = base - skew, ask offset = base + skew
+        (base - skew, base + skew)
+    }
 }
 
 impl Strategy for StatMM {
     /// On every new mid‐price tick:
     fn on_price_tick(&mut self, price: f64, _now: Instant) -> Vec<OrderRequest> {
+        println!("StatMM: on_price_tick({:.5})", price);
+        // 1) Add the new mid‐price
         self.prices.push(price);
 
-        // wait until we have enough samples to fit
-        if self.prices.len() >= 50 {
-            self.fit_ou();
-            let (bid, ask) = self.ao_quotes();
-            let size = 1.0;  // fixed for now
-            return vec![
-                OrderRequest { side: Side::Buy,  price: bid, size },
-                OrderRequest { side: Side::Sell, price: ask, size },
-            ];
+        // 2) If we exceed the window, drop the oldest
+        if self.prices.len() > self.window {
+            self.prices.remove(0);
         }
-        Vec::new()
+
+        // 3) Don’t quote until we’ve got a full window
+        if self.prices.len() < self.window {
+            return Vec::new();
+        }
+
+        println!("StatMM: prices {:?}", self.prices);
+        // 4) Fit volatility
+        self.fit_vol();
+
+        // 5) Compute offsets
+        let (δ_bid, δ_ask) = self.ao_offsets();
+
+        println!("StatMM: σ {:.5} δ_bid {:.5} δ_ask {:.5}", self.sigma, δ_bid, δ_ask);
+
+        // 6) Center around *current* mid (= price)
+        let bid_price = price - δ_bid;
+        let ask_price = price + δ_ask;
+
+        println!("StatMM: bid {:.5} ask {:.5}", bid_price, ask_price);
+
+        // sanity clamp: never negative
+        if bid_price <= 0.0 {
+            return Vec::new();
+        }
+
+        // 7) Emit both sides
+        let size = 1.0;
+        vec![
+            OrderRequest { side: Side::Buy,  price: bid_price, size },
+            OrderRequest { side: Side::Sell, price: ask_price, size },
+        ]
     }
 
     /// When an order actually fills, update inventory
